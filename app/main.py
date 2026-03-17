@@ -10,7 +10,7 @@ from openrouteservice import convert
 
 app = FastAPI(title="Smart Travel Planner API")
 
-API_key = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjM2ZGQyZDM1NzVmNjRjOTRiN2Y2YjYxZmYyZTZiMzk0IiwiaCI6Im11cm11cjY0In0="
+
 
 # Define what data we expect in the JSON body
 class TravelRequest(BaseModel):
