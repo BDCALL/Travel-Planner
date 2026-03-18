@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Smart Travel Planner</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        label { display: block; margin-top: 10px; }
+        select, input { padding: 5px; margin-top: 5px; }
+        #itinerary { margin-top: 20px; }
+        .day { margin-bottom: 15px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Smart Travel Planner</h1>
+    <form id="tripForm">
+        <label>City:</label>
+        <select id="city" required>
+            <option value="">Select a city</option>
+        </select>
+
+        <label>Preferences:</label>
+        <select id="preferences" multiple></select>
+
+        <label>Total Budget:</label>
+        <input type="number" id="budget" required>
+
+        <label>Number of Days:</label>
+        <input type="number" id="days" min="1" max="14" value="3">
+
+        <label>Attractions per Day (max 3):</label>
+        <input type="number" id="attractionsPerDay" min="1" max="3" value="1">
+
+        <label>Start Date:</label>
+        <input type="date" id="startDate" required>
+
+        <button type="submit">Generate Itinerary</button>
+    </form>
+
+    <div id="itinerary"></div>
+
+    <script>
+        async function loadCities() {
+            const citySelect = document.getElementById("city");
+            try {
+                const res = await fetch("/cities");
+                const cities = await res.json();
+                cities.forEach(city => {
+                    const option = document.createElement("option");
+                    option.value = city;
+                    option.text = city;
+                    citySelect.add(option);
+                });
+            } catch (err) {
+                console.error("Could not load cities:", err);
+            }
+        }
+
+        async function loadPreferences(city) {
+            const prefSelect = document.getElementById("preferences");
+            prefSelect.innerHTML = ""; // clear previous
+            if (!city) return;
+
+            try {
+                // Pass city as query parameter
+                const res = await fetch(`/preferences?city=${encodeURIComponent(city)}`);
+                const prefs = await res.json();
+                prefs.forEach(p => {
+                    const option = document.createElement("option");
+                    option.value = p;
+                    option.text = p;
+                    prefSelect.add(option);
+                });
+            } catch (err) {
+                console.error("Could not load preferences:", err);
+            }
+        }
+
+        document.getElementById("city").addEventListener("change", e => {
+            loadPreferences(e.target.value);
+        });
+
+        document.getElementById("tripForm").addEventListener("submit", async e => {
+            e.preventDefault();
+            const city = document.getElementById("city").value;
+            const budget = Number(document.getElementById("budget").value);
+            const days = Number(document.getElementById("days").value);
+            const attractionsPerDay = Number(document.getElementById("attractionsPerDay").value);
+            const startDate = document.getElementById("startDate").value;
+
+            const prefSelect = document.getElementById("preferences");
+            const preferences = Array.from(prefSelect.selectedOptions).map(opt => opt.value);
+
+            const payload = { city, budget, days, preferences, attractions_per_day: attractionsPerDay, start_date: startDate };
+
+            try {
+                const res = await fetch("/plan", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                displayItinerary(data);
+            } catch (err) {
+                console.error("Error generating itinerary:", err);
+            }
+        });
+
+        function displayItinerary(data) {
+            const container = document.getElementById("itinerary");
+            container.innerHTML = `<h2>${data.city} - ${data.start_date} to ${calculateEndDate(data.start_date, data.days)}</h2>`;
+            data.itinerary.forEach(day => {
+                const div = document.createElement("div");
+                div.className = "day";
+                div.innerHTML = `
+                    <strong>Day ${day.day}</strong><br>
+                    Attractions: ${day.attractions.join(", ")}<br>
+                    Restaurant: ${day.restaurant}<br>
+                    Weather: ${day.weather}<br>
+                    Total Cost: $${day.total_cost}
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function calculateEndDate(start, days) {
+            const d = new Date(start);
+            d.setDate(d.getDate() + days - 1);
+            return d.toISOString().split("T")[0];
+        }
+
+        window.addEventListener("DOMContentLoaded", loadCities);
+    </script>
+</body>
+</html>

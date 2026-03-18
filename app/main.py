@@ -1,264 +1,278 @@
-# app/main.py
-from pydantic import BaseModel
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from typing import List, Optional
-from app.planner import generate_itinerary
+import pandas as pd
+import random
 import requests
-import openrouteservice
-from openrouteservice import convert
+from datetime import date, timedelta
 
+app = FastAPI(title="Smart Travel Planner Portfolio Version")
 
-app = FastAPI(title="Smart Travel Planner API")
+# -------------------- Data --------------------
+CSV_FILE = "top100_cities_attractions.csv"
 
-API_key = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjM2ZGQyZDM1NzVmNjRjOTRiN2Y2YjYxZmYyZTZiMzk0IiwiaCI6Im11cm11cjY0In0="
+def load_data():
+    return pd.read_csv(CSV_FILE)
 
-# Define what data we expect in the JSON body
 class TravelRequest(BaseModel):
     city: str
     budget: int
     days: int
-    preferences: Optional[List[str]] = None 
+    preferences: Optional[List[str]] = None
+    attractions_per_day: Optional[int] = 1  # default 1 if not specified
+    start_date: Optional[date] = None       # optional start date
 
-# Latitude and longitude for each city
-CITY_COORDS = {
-    "Paris": {"lat": 48.8566, "lon": 2.3522},
-    "Tokyo": {"lat": 35.6895, "lon": 139.6917},
-    "London": {"lat": 51.5074, "lon": -0.1278}
+# -------------------- Geocoding --------------------
+def geocode_city(city: str):
+    """Get latitude and longitude from OpenStreetMap Nominatim API"""
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {"q": city, "format": "json", "limit": 1}
+        res = requests.get(url, params=params, headers={"User-Agent": "SmartTravelPlanner"})
+        data = res.json()
+        if data:
+            return {"lat": float(data[0]["lat"]), "lon": float(data[0]["lon"])}
+        return None
+    except:
+        return None
+
+# -------------------- Attractions --------------------
+def estimate_price(attraction):
+    typ = attraction["type"].lower()
+    base = {
+        "museum": 10,
+        "art": 12,
+        "gallery": 8,
+        "theme_park": 50,
+        "monument": 5,
+        "historic": 8,
+        "viewpoint": 0,
+        "park": 0
+    }.get(typ, 10)
+    if attraction.get("popularity", 0) > 100000:
+        base *= 1.5
+    return round(base)
+
+def get_attractions(city: str, daily_budget: int):
+    df = load_data()
+    city_df = df[df["City"].str.lower() == city.lower()]
+    attractions = []
+    for _, row in city_df.iterrows():
+        a = {
+            "name": row["Attraction"],
+            "type": row["Type"],
+            "lat": row["Latitude"],
+            "lon": row["Longitude"],
+            "tag": row.get("Indoor", "Outdoor"),
+            "popularity": row.get("Popularity", 0)
+        }
+        a["price"] = estimate_price(a)
+        if a["price"] <= daily_budget:
+            attractions.append(a)
+    return attractions
+
+# -------------------- Restaurants --------------------
+def get_restaurants():
+    return [
+        {"name": "Casual Cafe", "type": "casual"},
+        {"name": "Italian Bistro", "type": "italian"},
+        {"name": "Sushi Spot", "type": "japanese"},
+        {"name": "Steakhouse", "type": "steak"},
+        {"name": "Fine Dining", "type": "fine dining"}
+    ]
+
+def estimate_meal_cost(cuisine: str):
+    cuisine = cuisine.lower()
+    if "fine" in cuisine:
+        return random.randint(50, 90)
+    if "steak" in cuisine:
+        return random.randint(40, 70)
+    if "japanese" in cuisine:
+        return random.randint(25, 45)
+    if "italian" in cuisine:
+        return random.randint(20, 35)
+    return random.randint(10, 20)
+
+def get_price_category(price: int):
+    if price < 20: return "$"
+    if price < 40: return "$$"
+    if price < 60: return "$$$"
+    return "$$$$"
+
+# -------------------- Real Weather --------------------
+WEATHER_CODE_MAP = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Depositing rime fog",
+    51: "Drizzle light", 53: "Drizzle moderate", 55: "Drizzle dense",
+    56: "Freezing drizzle light", 57: "Freezing drizzle dense",
+    61: "Rain slight", 63: "Rain moderate", 65: "Rain heavy",
+    66: "Freezing rain light", 67: "Freezing rain heavy",
+    71: "Snow fall slight", 73: "Snow fall moderate", 75: "Snow fall heavy",
+    77: "Snow grains",
+    80: "Rain showers slight", 81: "Rain showers moderate", 82: "Rain showers violent",
+    85: "Snow showers slight", 86: "Snow showers heavy",
+    95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail"
 }
 
+def interpret_weather(precip, weather_code):
+    if precip > 5:
+        rain_desc = "Heavy rain"
+    elif precip > 1:
+        rain_desc = "Light rain"
+    else:
+        rain_desc = "No significant rain"
+    code_desc = WEATHER_CODE_MAP.get(weather_code, "Unknown weather")
+    return f"{code_desc}, {rain_desc}"
 
-def get_wikipedia_pageviews(title: str):
-    """Get last 60 days of Wikipedia pageviews for a given title"""
-    url = f"https://en.wikipedia.org/w/api.php"
+def get_real_weather(lat: float, lon: float, days: int, start_date: Optional[date] = None):
+    start_date = start_date or (date.today() + timedelta(days=1))
+    start_date_str = start_date.isoformat()
+    url = "https://api.open-meteo.com/v1/forecast"
     params = {
-        "action": "query",
-        "prop": "pageviews",
-        "titles": title,
-        "format": "json"
+        "latitude": lat,
+        "longitude": lon,
+        "daily": "precipitation_sum,weathercode",
+        "forecast_days": days,
+        "timezone": "auto",
+        "start_date": start_date_str
     }
     try:
-        res = requests.get(url, params=params)
+        res = requests.get(url, params=params, timeout=10)
         data = res.json()
-        pages = data.get("query", {}).get("pages", {})
-        for page in pages.values():
-            pageviews = page.get("pageviews", {})
-            total_views = sum(v for v in pageviews.values() if isinstance(v, int))
-            return total_views
-    except:
-        return 0
-
-def get_attractions(city: str, lat: float, lon: float, preferences: Optional[List[str]] = None):
-    url = "https://overpass-api.de/api/interpreter"
-    
-    query = f"""
-    [out:json];
-    (
-      node["tourism"](around:10000,{lat},{lon});
-      way["tourism"](around:10000,{lat},{lon});
-      relation["tourism"](around:10000,{lat},{lon});
-      node["historic"](around:10000,{lat},{lon});
-      way["historic"](around:10000,{lat},{lon});
-      relation["historic"](around:10000,{lat},{lon});
-    );
-    out center qt;
-    """
-    
-    try:
-        res = requests.get(url, params={"data": query}, timeout=60)
-        data = res.json()
-        elements = data.get("elements", [])
-        print(f"Found {len(elements)} tourism/historic elements from Overpass API")  # Debug
-
-        attractions = []
-        for element in elements:
-            tags = element.get("tags", {})
-            name = tags.get("name")
-            typ = tags.get("tourism") or tags.get("historic") or "unknown"
-            if name:
-                lat_el = element.get("lat") or element.get("center", {}).get("lat")
-                lon_el = element.get("lon") or element.get("center", {}).get("lon")
-                if lat_el and lon_el:
-                    attractions.append({"name": name, "type": typ, "lat": lat_el, "lon": lon_el})
-
-        # Filter by preferences if given
-        if preferences:
-            prefs_lower = [p.lower() for p in preferences]
-            filtered = [
-                a for a in attractions
-                if any(pref in a["type"].lower() or pref in a["name"].lower() for pref in prefs_lower)
-            ]
-            if filtered:
-                attractions = filtered
-
-        return attractions[:15]  # top 15 attractions
-    except Exception as e:
-        print("Overpass API error:", e)
-        return []
-
-def get_weather(city: str, days: int):
-    if city not in CITY_COORDS:
-        return {"error": f"No coordinates found for {city}"}
-
-    lat = CITY_COORDS[city]["lat"]
-    lon = CITY_COORDS[city]["lon"]
-
-    url = (
-        f"https://api.open-meteo.com/v1/forecast"
-        f"?latitude={lat}&longitude={lon}"
-        f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode"
-        f"&forecast_days={days}&timezone=auto"
-    )
-
-    try:
-        res = requests.get(url)
-        data = res.json()
-
-        # Collect simplified daily forecast
-        daily_weather = []
+        daily = data.get("daily", {})
+        weather_list = []
         for i in range(days):
-            daily_weather.append({
+            weather_list.append({
                 "day": i + 1,
-                "temp_max": data["daily"]["temperature_2m_max"][i],
-                "temp_min": data["daily"]["temperature_2m_min"][i],
-                "precipitation": data["daily"]["precipitation_sum"][i],
-                "weathercode": data["daily"]["weathercode"][i]
+                "precipitation": daily.get("precipitation_sum", [0]*days)[i],
+                "weathercode": daily.get("weathercode", [0]*days)[i]
             })
-        return daily_weather
-    except Exception as e:
-        return {"error": str(e)}
+        return weather_list
+    except:
+        return [{"day": i+1, "precipitation": 0, "weathercode": 0} for i in range(days)]
 
-
-def get_restaurants(city: str, lat: float, lon: float, preferences: Optional[List[str]] = None):
-    """Get nearby restaurants from OpenStreetMap (Overpass API) and filter by user preferences."""
-    url = "https://overpass-api.de/api/interpreter"
-    query = f"""
-    [out:json];
-    node
-      ["amenity"="restaurant"]
-      (around:5000,{lat},{lon});
-    out;
-    """
+# -------------------- API --------------------
+@app.get("/cities")
+def get_cities():
     try:
-        res = requests.get(url, params={"data": query})
-        data = res.json()
+        df = load_data()
+        cities = sorted(df["City"].unique())
+        return JSONResponse(content=cities)
+    except:
+        return JSONResponse(content=[], status_code=500)
 
-        restaurants = []
-        for element in data.get("elements", []):
-            name = element.get("tags", {}).get("name", "Unnamed Restaurant")
-            cuisine = element.get("tags", {}).get("cuisine", "unknown")
-            restaurants.append({
-                "name": name,
-                "type": cuisine,
-                "lat": element.get("lat"),
-                "lon": element.get("lon")
-            })
-
-        # 🎯 Apply filtering by preferences
-        if preferences:
-            prefs_lower = [p.lower() for p in preferences]
-            filtered = [
-                r for r in restaurants
-                if any(pref in r["type"].lower() or pref in r["name"].lower() for pref in prefs_lower)
-            ]
-            if filtered:
-                restaurants = filtered
-
-        return restaurants[:10]  # return top 10 for simplicity
-    except Exception as e:
-        print("Overpass error:", e)
-        return []
-
-@app.get("/")
-def root():
-    return {"message": "Welcome to Smart Travel Planner!"}
-
-def get_travel_time(origin, destination):
-    """Return driving distance and duration (in minutes)."""
+@app.get("/preferences")
+def get_preferences():
     try:
-        client = openrouteservice.Client(key=API_key)
-        route = client.directions(
-            coordinates=[origin, destination],
-            profile='driving-car',
-            format='geojson'
-        )
-        summary = route['features'][0]['properties']['summary']
-        return {
-            "distance_km": round(summary['distance'] / 1000, 2),
-            "duration_min": round(summary['duration'] / 60, 1)
-        }
-    except Exception as e:
-        return {"error": str(e)}
+        df = load_data()
+        types = sorted(df["Type"].dropna().unique())
+        return JSONResponse(content=types)
+    except:
+        return JSONResponse(content=[], status_code=500)
+
 @app.post("/plan")
 def plan_trip(request: TravelRequest):
     city = request.city
     days = request.days
     prefs = request.preferences or []
+    per_day = min(request.attractions_per_day or 1, 3)
+    daily_budget = request.budget / days
 
-    # Get city coordinates
-    coords = CITY_COORDS.get(city)
+    # Get coordinates dynamically
+    coords = geocode_city(city)
     if not coords:
-        return {"error": f"Coordinates not found for {city}"}
+        return {"error": f"Could not get coordinates for {city}"}
     lat, lon = coords["lat"], coords["lon"]
 
-    # Get attractions dynamically from Overpass API
-    attractions = get_attractions(city, lat, lon, prefs)
+    # Attractions
+    all_attractions = get_attractions(city, daily_budget)
+    if prefs:
+        available_types = {a["type"] for a in all_attractions}
+        prefs = [p for p in prefs if p in available_types]
 
-    # Deduplicate attractions by name and coordinates
-    unique_attractions = {}
-    for a in attractions:
-        key = (a["name"].lower(), round(a["lat"], 5), round(a["lon"], 5))
-        if key not in unique_attractions:
-            unique_attractions[key] = a
-    attractions = list(unique_attractions.values())
+    if not all_attractions:
+        return {"error": "No attractions found within budget"}
 
-    if not attractions:
-        return {"error": f"No attractions found for {city}"}
+    # Restaurants
+    restaurants = get_restaurants()
 
-    # Get restaurants dynamically from Overpass API
-    restaurants = get_restaurants(city, lat, lon, prefs)
+    # Weather
+    weather_forecast = get_real_weather(lat, lon, days, request.start_date)
 
-    # Weather forecast
-    weather_forecast = get_weather(city, days)
-
-    # Prepare itinerary
+    # Shuffle attractions to avoid same types in a day
+    random.shuffle(all_attractions)
+    available = all_attractions.copy()
     itinerary = []
-    available_attractions = attractions.copy()  # copy so we can remove used ones
 
-    for day in range(1, days + 1):
-        day_weather = weather_forecast[day - 1] if isinstance(weather_forecast, list) else {}
-        precipitation = day_weather.get("precipitation", 0)
+    for day in range(days):
+        raw_weather = weather_forecast[day]
+        weather_str = interpret_weather(raw_weather["precipitation"], raw_weather["weathercode"])
 
-        # Choose indoor or outdoor attractions
-        if precipitation > 2:  # rainy day
-            candidates = [a for a in available_attractions if a["type"] in ["museum", "temple", "food"]]
-        else:  # nice weather
-            candidates = [a for a in available_attractions if a["type"] in ["landmark", "neighborhood", "sightseeing", "park"]]
+        # Indoor/outdoor filtering
+        if raw_weather["precipitation"] > 1:
+            candidates = [a for a in available if a["tag"].lower() == "indoor"]
+        else:
+            candidates = [a for a in available if a["tag"].lower() == "outdoor"]
 
-        if not candidates:
-            # fallback if no indoor/outdoor match left
-            candidates = available_attractions
+        if len(candidates) < per_day:
+            candidates = available  # fallback
 
-        if not candidates:
-            break  # no attractions left
+        # Pick attractions maximizing category diversity
+        chosen_attractions = []
+        used_types = set()
+        random.shuffle(candidates)
+        for a in candidates:
+            if len(chosen_attractions) >= per_day:
+                break
+            if a["type"] not in used_types:
+                chosen_attractions.append(a)
+                used_types.add(a["type"])
 
-        chosen = candidates[0]  # pick the first available
-        available_attractions.remove(chosen)  # remove to avoid repeats
+        if len(chosen_attractions) < per_day:
+            for a in candidates:
+                if len(chosen_attractions) >= per_day:
+                    break
+                if a not in chosen_attractions:
+                    chosen_attractions.append(a)
 
-        # Pick a restaurant (still cycles if days > number of restaurants)
-        restaurant = restaurants[(day - 1) % len(restaurants)] if restaurants else {"name": "No restaurant", "type": ""}
+        for a in chosen_attractions:
+            available.remove(a)
+
+        # Restaurant
+        total_attraction_cost = sum(a["price"] for a in chosen_attractions)
+        restaurant_budget = max(daily_budget - total_attraction_cost, 0)
+        valid_restaurants = []
+        for r in restaurants:
+            price = estimate_meal_cost(r["type"])
+            if price <= restaurant_budget:
+                r_copy = r.copy()
+                r_copy["price"] = price
+                r_copy["price_category"] = get_price_category(price)
+                valid_restaurants.append(r_copy)
+        restaurant = random.choice(valid_restaurants) if valid_restaurants else {"name":"None","price":0,"price_category":"$"}
 
         itinerary.append({
-            "day": day,
-            "attraction": f"{chosen['name']} ({chosen['type']})",
-            "restaurant": f"{restaurant['name']} ({restaurant['type']})",
-            "weather": day_weather
+            "day": day + 1,
+            "attractions": [f"{a['name']} ({a['type']})" for a in chosen_attractions],
+            "restaurant": f"{restaurant['name']} ({restaurant['type']}) - {restaurant['price_category']} ${restaurant['price']}",
+            "weather": weather_str,
+            "total_cost": total_attraction_cost + restaurant["price"]
         })
+
+    start_date_str = request.start_date.isoformat() if request.start_date else (date.today() + timedelta(days=1)).isoformat()
 
     return {
         "city": city,
-        "budget": request.budget,
+        "total_budget": request.budget,
         "days": days,
         "preferences": prefs,
-        "weather forecast": weather_forecast,
+        "attractions_per_day": per_day,
+        "start_date": start_date_str,
+        "weather_forecast": [interpret_weather(w["precipitation"], w["weathercode"]) for w in weather_forecast],
         "itinerary": itinerary
     }
+
+# -------------------- Serve Front-End --------------------
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")

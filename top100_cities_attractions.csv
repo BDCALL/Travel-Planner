@@ -104,7 +104,7 @@ Dubai,Burj Al Arab,Landmark,25.1412,55.1853,Indoor
 Dubai,The Dubai Mall,Neighborhood,25.1972,55.2796,Indoor
 Dubai,Dubai Fountain,Landmark,25.1975,55.2796,Outdoor
 Dubai,Dubai Marina,Neighborhood,25.0780,55.1402,Outdoor
-Dubai,Madinat Jumeirah,Neighborhood,Outdoor,25.1301,55.2168,Outdoor
+Dubai,Madinat Jumeirah,Neighborhood,25.1301,55.2168,Outdoor
 Dubai,Jumeirah Beach,Park,25.1410,55.1853,Outdoor
 Dubai,Souk Madinat,Neighborhood,25.1298,55.2180,Indoor
 Dubai,Dubai Opera,Historic,25.2053,55.2722,Indoor
@@ -993,7 +993,7 @@ Osaka,Namba Parks,Shopping,34.6645,135.5020,Outdoor
 Osaka,Tsutenkaku Tower,Landmark,34.6526,135.5060,Outdoor
 Osaka,Tennoji Zoo,Recreation,34.6533,135.5145,Outdoor
 Osaka,Minoo Park,Park,34.8341,135.4705,Outdoor
-Osaka,National Museum of Art,Osaka,Museum,34.6613,135.4940,Indoor
+Osaka,National Museum of Art,Museum,34.6613,135.4940,Indoor
 Osaka,Kaiyukan Ferris Wheel,Recreation,34.6545,135.4280,Outdoor
 Osaka,Osaka Science Museum,Museum,34.6861,135.5037,Indoor
 Osaka,America Mura,Neighborhood,34.6753,135.5012,Outdoor
