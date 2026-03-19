@@ -1,135 +1,106 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Smart Travel Planner</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        label { display: block; margin-top: 10px; }
-        select, input { padding: 5px; margin-top: 5px; }
-        #itinerary { margin-top: 20px; }
-        .day { margin-bottom: 15px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
-    </style>
+<meta charset="UTF-8">
+<title>Smart Travel Planner</title>
+<style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #e0f7fa; }
+    h1 { text-align: center; color: #00796b; margin-bottom: 30px; }
+    form { max-width: 600px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 15px; box-shadow: 0 8px 16px rgba(0,0,0,0.1);}
+    label { display: block; margin-top: 15px; font-weight: 600; color: #004d40; }
+    input, button { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid #b2dfdb; }
+    #preferencesContainer { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; }
+    .checkbox-label { background: #e0f2f1; padding: 8px 12px; border-radius: 20px; cursor: pointer; font-size: 0.95rem; border: 1px solid transparent; }
+    .checkbox-label:hover { background: #b2dfdb; border: 1px solid #00796b; }
+    .checkbox-label input { margin-right: 8px; accent-color: #00796b; }
+    button { background-color: #00796b; color: #fff; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    button:hover { background-color: #004d40; }
+</style>
 </head>
 <body>
-    <h1>Smart Travel Planner</h1>
-    <form id="tripForm">
-        <label>City:</label>
-        <select id="city" required>
-            <option value="">Select a city</option>
-        </select>
 
-        <label>Preferences:</label>
-        <select id="preferences" multiple></select>
+<h1>Smart Travel Planner</h1>
 
-        <label>Total Budget:</label>
-        <input type="number" id="budget" required>
+<form id="tripForm">
+    <label>City:</label>
+    <input id="city" list="citiesList" required>
+    <datalist id="citiesList"></datalist>
 
-        <label>Number of Days:</label>
-        <input type="number" id="days" min="1" max="14" value="3">
+    <label>Preferences:</label>
+    <div id="preferencesContainer"></div>
 
-        <label>Attractions per Day (max 3):</label>
-        <input type="number" id="attractionsPerDay" min="1" max="3" value="1">
+    <label>Total Budget ($):</label>
+    <input type="number" id="budget" required>
 
-        <label>Start Date:</label>
-        <input type="date" id="startDate" required>
+    <label>Number of Days:</label>
+    <input type="number" id="days" min="1" max="14" value="3">
 
-        <button type="submit">Generate Itinerary</button>
-    </form>
+    <label>Attractions per Day (max 3):</label>
+    <input type="number" id="attractionsPerDay" min="1" max="3" value="1">
 
-    <div id="itinerary"></div>
+    <label>Start Date:</label>
+    <input type="date" id="startDate">
 
-    <script>
-        async function loadCities() {
-            const citySelect = document.getElementById("city");
-            try {
-                const res = await fetch("/cities");
-                const cities = await res.json();
-                cities.forEach(city => {
-                    const option = document.createElement("option");
-                    option.value = city;
-                    option.text = city;
-                    citySelect.add(option);
-                });
-            } catch (err) {
-                console.error("Could not load cities:", err);
-            }
-        }
+    <button type="submit">Generate Itinerary</button>
+</form>
 
-        async function loadPreferences(city) {
-            const prefSelect = document.getElementById("preferences");
-            prefSelect.innerHTML = ""; // clear previous
-            if (!city) return;
+<script>
+async function loadCities() {
+    const res = await fetch("/cities");
+    const cities = await res.json();
+    const dataList = document.getElementById("citiesList");
+    dataList.innerHTML = "";
+    cities.forEach(city => { const opt = document.createElement("option"); opt.value = city; dataList.appendChild(opt); });
+}
 
-            try {
-                // Pass city as query parameter
-                const res = await fetch(`/preferences?city=${encodeURIComponent(city)}`);
-                const prefs = await res.json();
-                prefs.forEach(p => {
-                    const option = document.createElement("option");
-                    option.value = p;
-                    option.text = p;
-                    prefSelect.add(option);
-                });
-            } catch (err) {
-                console.error("Could not load preferences:", err);
-            }
-        }
-
-        document.getElementById("city").addEventListener("change", e => {
-            loadPreferences(e.target.value);
+async function loadPreferences(city) {
+    const container = document.getElementById("preferencesContainer");
+    container.innerHTML = "";
+    if (!city) return;
+    try {
+        const res = await fetch(`/preferences?city=${encodeURIComponent(city)}`);
+        const prefs = await res.json();
+        prefs.forEach(p => {
+            const label = document.createElement("label");
+            label.className = "checkbox-label";
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox"; checkbox.value = p;
+            label.appendChild(checkbox); label.appendChild(document.createTextNode(" "+p));
+            container.appendChild(label);
         });
+    } catch(err){ console.error(err); }
+}
 
-        document.getElementById("tripForm").addEventListener("submit", async e => {
-            e.preventDefault();
-            const city = document.getElementById("city").value;
-            const budget = Number(document.getElementById("budget").value);
-            const days = Number(document.getElementById("days").value);
-            const attractionsPerDay = Number(document.getElementById("attractionsPerDay").value);
-            const startDate = document.getElementById("startDate").value;
+const cityInput = document.getElementById("city");
+cityInput.addEventListener("input", e => loadPreferences(e.target.value));
 
-            const prefSelect = document.getElementById("preferences");
-            const preferences = Array.from(prefSelect.selectedOptions).map(opt => opt.value);
+document.getElementById("tripForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const city = cityInput.value;
+    const budget = Number(document.getElementById("budget").value);
+    const days = Number(document.getElementById("days").value);
+    const attractionsPerDay = Number(document.getElementById("attractionsPerDay").value);
+    let startDate = document.getElementById("startDate").value || new Date().toISOString().split("T")[0];
 
-            const payload = { city, budget, days, preferences, attractions_per_day: attractionsPerDay, start_date: startDate };
+    const prefContainer = document.getElementById("preferencesContainer");
+    const preferences = Array.from(prefContainer.querySelectorAll("input[type=checkbox]:checked")).map(cb=>cb.value);
 
-            try {
-                const res = await fetch("/plan", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                displayItinerary(data);
-            } catch (err) {
-                console.error("Error generating itinerary:", err);
-            }
+    const payload = { city, budget, days, preferences, attractions_per_day: attractionsPerDay, start_date: startDate };
+
+    // Save response to sessionStorage and jump to itinerary page
+    try {
+        const res = await fetch("/plan", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
         });
+        const data = await res.json();
+        sessionStorage.setItem("itineraryData", JSON.stringify(data));
+        window.location.href = "/static/itinerary.html"; // go to new page
+    } catch(err) { console.error(err); }
+});
 
-        function displayItinerary(data) {
-            const container = document.getElementById("itinerary");
-            container.innerHTML = `<h2>${data.city} - ${data.start_date} to ${calculateEndDate(data.start_date, data.days)}</h2>`;
-            data.itinerary.forEach(day => {
-                const div = document.createElement("div");
-                div.className = "day";
-                div.innerHTML = `
-                    <strong>Day ${day.day}</strong><br>
-                    Attractions: ${day.attractions.join(", ")}<br>
-                    Restaurant: ${day.restaurant}<br>
-                    Weather: ${day.weather}<br>
-                    Total Cost: $${day.total_cost}
-                `;
-                container.appendChild(div);
-            });
-        }
-
-        function calculateEndDate(start, days) {
-            const d = new Date(start);
-            d.setDate(d.getDate() + days - 1);
-            return d.toISOString().split("T")[0];
-        }
-
-        window.addEventListener("DOMContentLoaded", loadCities);
-    </script>
+window.addEventListener("DOMContentLoaded", loadCities);
+</script>
 </body>
 </html>

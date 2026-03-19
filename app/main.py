@@ -7,6 +7,7 @@ import pandas as pd
 import random
 import requests
 from datetime import date, timedelta
+import os
 
 app = FastAPI(title="Smart Travel Planner Portfolio Version")
 
@@ -80,20 +81,33 @@ def get_restaurants():
         {"name": "Italian Bistro", "type": "italian"},
         {"name": "Sushi Spot", "type": "japanese"},
         {"name": "Steakhouse", "type": "steak"},
-        {"name": "Fine Dining", "type": "fine dining"}
+        {"name": "Fine Dining", "type": "fine dining"},
+        {"name": "Street Food Hub", "type": "street food"},
+        {"name": "Vegan Delight", "type": "vegan"},
+        {"name": "Seafood Grill", "type": "seafood"},
+        {"name": "BBQ House", "type": "bbq"},
+        {"name": "Fusion Kitchen", "type": "fusion"}
     ]
 
 def estimate_meal_cost(cuisine: str):
     cuisine = cuisine.lower()
+
     if "fine" in cuisine:
-        return random.randint(50, 90)
-    if "steak" in cuisine:
+        return random.randint(60, 100)
+    if "steak" in cuisine or "bbq" in cuisine:
         return random.randint(40, 70)
+    if "seafood" in cuisine:
+        return random.randint(35, 60)
     if "japanese" in cuisine:
         return random.randint(25, 45)
-    if "italian" in cuisine:
-        return random.randint(20, 35)
-    return random.randint(10, 20)
+    if "italian" in cuisine or "fusion" in cuisine:
+        return random.randint(20, 40)
+    if "vegan" in cuisine:
+        return random.randint(15, 30)
+    if "street" in cuisine:
+        return random.randint(8, 20)
+
+    return random.randint(10, 25)
 
 def get_price_category(price: int):
     if price < 20: return "$"
@@ -164,9 +178,11 @@ def get_cities():
         return JSONResponse(content=[], status_code=500)
 
 @app.get("/preferences")
-def get_preferences():
+def get_preferences(city: Optional[str] = None):
     try:
         df = load_data()
+        if city:
+            df = df[df["City"].str.lower() == city.lower()]
         types = sorted(df["Type"].dropna().unique())
         return JSONResponse(content=types)
     except:
@@ -219,50 +235,63 @@ def plan_trip(request: TravelRequest):
         if len(candidates) < per_day:
             candidates = available  # fallback
 
-        # Pick attractions maximizing category diversity
-        chosen_attractions = []
+        # 🎯 SMART ATTRACTION SELECTION (uses budget better)
+        candidates.sort(key=lambda a: a["price"], reverse=True)
+
+        chosen = []
         used_types = set()
-        random.shuffle(candidates)
+
         for a in candidates:
-            if len(chosen_attractions) >= per_day:
+            if len(chosen) >= per_day:
                 break
             if a["type"] not in used_types:
-                chosen_attractions.append(a)
+                chosen.append(a)
                 used_types.add(a["type"])
 
-        if len(chosen_attractions) < per_day:
-            for a in candidates:
-                if len(chosen_attractions) >= per_day:
-                    break
-                if a not in chosen_attractions:
-                    chosen_attractions.append(a)
+        # fill remaining if needed
+        for a in candidates:
+            if len(chosen) >= per_day:
+                break
+            if a not in chosen:
+                chosen.append(a)
 
-        for a in chosen_attractions:
+        for a in chosen:
             available.remove(a)
-
+            
         # Restaurant
-        total_attraction_cost = sum(a["price"] for a in chosen_attractions)
-        restaurant_budget = max(daily_budget - total_attraction_cost, 0)
+        attraction_cost = sum(a["price"] for a in chosen)
+        remaining_budget = max(daily_budget - attraction_cost, 0)
+
         valid_restaurants = []
         for r in restaurants:
             price = estimate_meal_cost(r["type"])
-            if price <= restaurant_budget:
-                r_copy = r.copy()
-                r_copy["price"] = price
-                r_copy["price_category"] = get_price_category(price)
-                valid_restaurants.append(r_copy)
-        restaurant = random.choice(valid_restaurants) if valid_restaurants else {"name":"None","price":0,"price_category":"$"}
+            r_copy = r.copy()
+            r_copy["price"] = price
+            r_copy["category"] = get_price_category(price)
+            valid_restaurants.append(r_copy)
+
+        restaurant = min(
+            valid_restaurants,
+            key=lambda r: abs(r["price"] - remaining_budget)
+        )
+
 
         itinerary.append({
             "day": day + 1,
-            "attractions": [f"{a['name']} ({a['type']})" for a in chosen_attractions],
-            "restaurant": f"{restaurant['name']} ({restaurant['type']}) - {restaurant['price_category']} ${restaurant['price']}",
+            "attractions": [f"{a['name']} ({a['type']})" for a in chosen],
+            "restaurant": f"{restaurant['name']} ({restaurant['type']}) - {restaurant['category']} ${restaurant['price']}",
             "weather": weather_str,
-            "total_cost": total_attraction_cost + restaurant["price"]
+            "total_cost": attraction_cost + restaurant["price"]
         })
 
     start_date_str = request.start_date.isoformat() if request.start_date else (date.today() + timedelta(days=1)).isoformat()
-
+    img_dir = "static/images_city"
+    image_path = None
+    for ext in ["jpeg","jpg","png"]:
+        path = f"{img_dir}/{city.lower().replace(' ','_')}.{ext}"
+        if os.path.isfile(path):
+            image_path=f"/{path}"
+            break
     return {
         "city": city,
         "total_budget": request.budget,
@@ -271,7 +300,8 @@ def plan_trip(request: TravelRequest):
         "attractions_per_day": per_day,
         "start_date": start_date_str,
         "weather_forecast": [interpret_weather(w["precipitation"], w["weathercode"]) for w in weather_forecast],
-        "itinerary": itinerary
+        "itinerary": itinerary,
+        "image" : image_path
     }
 
 # -------------------- Serve Front-End --------------------

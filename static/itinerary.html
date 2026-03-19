@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Itinerary</title>
+<style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #e0f7fa; }
+    h1 { text-align: center; color: #00796b; margin-bottom: 20px; }
+    #cityImage { display: block; max-width: 100%; border-radius: 15px; margin: 20px auto; box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
+    #itinerary { max-width: 900px; margin: 0 auto; }
+    .day { margin-bottom: 20px; padding: 20px; border-radius: 12px; background: #f1f8e9; box-shadow: 0 4px 8px rgba(0,0,0,0.05);}
+    .day:hover { transform: translateY(-2px); transition: 0.2s; }
+    .price { color: #1b5e20; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<h1>Your Trip Itinerary</h1>
+<img id="cityImage" src="" alt="City Image">
+<div id="itinerary"></div>
+
+<script>
+function displayItinerary(data) {
+    if(!data) { document.getElementById("itinerary").innerHTML = "<p>No itinerary found.</p>"; return; }
+
+    // Show city image
+    const img = document.getElementById("cityImage");
+    const baseName = data.city.toLowerCase().replace(/\s+/g, '');
+    const extensions = ["jpg","jpeg","png"];
+    (async function(){
+        for(let ext of extensions){
+            const url = `/static/images_city/${baseName}.${ext}`;
+            try{ const res = await fetch(url,{method:"HEAD"}); if(res.ok){ img.src=url; break; } }catch(e){}
+        }
+    })();
+
+    const container = document.getElementById("itinerary");
+    const endDate = new Date(data.start_date); endDate.setDate(endDate.getDate() + data.days -1);
+    container.innerHTML = `<h2>${data.city}</h2>
+        <p><strong>Trip:</strong> ${data.start_date} → ${endDate.toISOString().split("T")[0]}</p>
+        <p><strong>Budget:</strong> $${data.total_budget}</p>
+        <p><strong>Attractions per day:</strong> ${data.attractions_per_day}</p>`;
+
+    data.itinerary.forEach(day=>{
+        const div = document.createElement("div"); div.className="day";
+        div.innerHTML = `<strong>Day ${day.day}</strong><br><br>
+            <strong>Attractions:</strong><br>${day.attractions.map(a=>`• ${a}`).join("<br>")}<br><br>
+            <strong>Restaurant:</strong><br>${day.restaurant}<br><br>
+            <strong>Weather:</strong> ${day.weather}<br>
+            <span class="price">Total Cost: $${day.total_cost}</span>`;
+        container.appendChild(div);
+    });
+}
+
+// Load from sessionStorage
+const data = JSON.parse(sessionStorage.getItem("itineraryData"));
+displayItinerary(data);
+</script>
+
+</body>
+</html>
