@@ -222,6 +222,8 @@ def plan_trip(request: TravelRequest):
     available = all_attractions.copy()
     itinerary = []
 
+    assigned_prefs = {p: 0 for p in prefs} 
+
     for day in range(days):
         raw_weather = weather_forecast[day]
         weather_str = interpret_weather(raw_weather["precipitation"], raw_weather["weathercode"])
@@ -240,6 +242,18 @@ def plan_trip(request: TravelRequest):
 
         chosen = []
         used_types = set()
+
+        for p in prefs:
+            if len(chosen) >= per_day:
+                break
+            if assigned_prefs[p] < 1:
+                for a in candidates:
+                    if a["type"] == p and a not in chosen:
+                        chosen.append(a)
+                        used_types.add(a["type"])
+                        assigned_prefs[p] += 1
+                        break
+
 
         for a in candidates:
             if len(chosen) >= per_day:
